@@ -8,7 +8,7 @@ resource "azurerm_user_assigned_identity" "aks_identity" {
 data "azurerm_subscription" "current" {}
 
 resource "azurerm_role_assignment" "aks_network_contributer" {
-  scope                = "/subscriptions/${data.azurerm_subscription.current.subscription_id}/resourceGroups/${var.resource_group_name}/providers/Microsoft.Network/virtualNetworks/${var.vnet_name}/subnets/${var.subnet_name}"
+  scope                = var.subnet_id
   role_definition_name = "Network Contributor"
   principal_id         = resource.azurerm_user_assigned_identity.aks_identity.principal_id
 }
@@ -46,6 +46,7 @@ resource "azurerm_kubernetes_cluster" "aks" {
     only_critical_addons_enabled = false # Default pool runs all workloads except Materialize
     vnet_subnet_id               = var.subnet_id
     os_disk_size_gb              = var.default_node_pool_os_disk_size_gb
+    max_pods                     = var.default_node_pool_max_pods
     node_labels                  = var.default_node_pool_node_labels
 
     upgrade_settings {
@@ -88,14 +89,16 @@ resource "azurerm_kubernetes_cluster" "aks" {
   }
 
   network_profile {
-    network_plugin     = var.network_plugin
-    network_policy     = var.network_policy
-    network_data_plane = var.network_data_plane
-    service_cidr       = var.service_cidr
-    dns_service_ip     = var.dns_service_ip != null ? var.dns_service_ip : cidrhost(var.service_cidr, 10)
-    load_balancer_sku  = var.load_balancer_sku
+    network_plugin      = var.network_plugin
+    network_plugin_mode = var.network_plugin_mode
+    pod_cidr            = var.network_plugin_mode == "overlay" ? var.pod_cidr : null
+    network_policy      = var.network_policy
+    network_data_plane  = var.network_data_plane
+    service_cidr        = var.service_cidr
+    dns_service_ip      = var.dns_service_ip != null ? var.dns_service_ip : cidrhost(var.service_cidr, 10)
+    load_balancer_sku   = var.load_balancer_sku
     # https://learn.microsoft.com/en-gb/azure/aks/nat-gateway#create-an-aks-cluster-with-a-user-assigned-nat-gateway
-    outbound_type = "userAssignedNATGateway"
+    outbound_type = "userDefinedRouting"
   }
 
   storage_profile {

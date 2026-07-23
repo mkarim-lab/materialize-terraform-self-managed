@@ -135,6 +135,18 @@ variable "default_node_pool_node_labels" {
   nullable    = false
 }
 
+variable "default_node_pool_max_pods" {
+  description = "Maximum number of pods per node in the default node pool. Azure CNI pre-allocates (max_count + 1 surge) * (max_pods + 1) IPs from the subnet, so lower this to fit small subnets."
+  type        = number
+  default     = 30
+  nullable    = false
+
+  validation {
+    condition     = var.default_node_pool_max_pods >= 10 && var.default_node_pool_max_pods <= 250
+    error_message = "default_node_pool_max_pods must be between 10 and 250 (Azure CNI limits)."
+  }
+}
+
 
 variable "enable_azure_monitor" {
   description = "Enable Azure Monitor for the AKS cluster"
@@ -199,6 +211,52 @@ variable "network_data_plane" {
   validation {
     condition     = contains(["azure", "cilium"], var.network_data_plane)
     error_message = "Network data plane must be either 'azure' or 'cilium'."
+  }
+}
+
+# Azure CNI Overlay mode (https://learn.microsoft.com/en-us/azure/aks/azure-cni-overlay):
+# pods get their IPs from pod_cidr, an internal, non-VNet-routable range that is
+# NOT carved out of the AKS subnet. Only NODES (not pods) consume subnet IPs in
+# this mode, so max_pods no longer drives subnet IP pre-allocation. This is what
+# unblocks small/constrained subnets like the one used in this environment.
+#
+# Requirements:
+# - Must NOT overlap the VNet address space, service_cidr, or any peered/on-prem
+#   network reachable from this cluster (overlay traffic is encapsulated, but a
+#   literal CIDR collision with a real route can still cause confusing failures).
+# - Can only be set at cluster creation time; changing it requires recreating the
+#   cluster (network_plugin_mode is ForceNew in the underlying AKS API).
+#
+# PROD recommendation: don't reuse this exact CIDR blindly across environments/
+# clusters if they're ever peered together or share a hub VNet — pick a
+# per-cluster CIDR from a range your network team has reserved for AKS overlay
+# pod use, sized to your expected max pod count, to avoid collisions when
+# multiple clusters are connected to the same hub-spoke topology.
+variable "pod_cidr" {
+  description = "Pod CIDR for Azure CNI Overlay mode. Must not overlap the VNet, service_cidr, or any peered network. Only used when network_plugin_mode is \"overlay\"."
+  type        = string
+  default     = "10.244.0.0/16"
+  nullable    = false
+
+  validation {
+    condition     = can(cidrhost(var.pod_cidr, 0))
+    error_message = "pod_cidr must be a valid CIDR block (e.g., '10.244.0.0/16')."
+  }
+}
+
+# PROD recommendation: overlay is a good default for constrained subnets (this
+# environment). Consider standard Azure CNI (network_plugin_mode = null) instead
+# if PROD requires direct pod-to-VNet IP routability (e.g. on-prem firewalls or
+# monitoring systems that must reach individual pod IPs), and size the subnet
+# accordingly using the (max_nodes + surge) * (max_pods + 1) formula in that case.
+variable "network_plugin_mode" {
+  description = "Set to \"overlay\" to enable Azure CNI Overlay (pods use pod_cidr instead of consuming AKS subnet IPs). Set to null for standard Azure CNI (pods consume subnet IPs directly)."
+  type        = string
+  default     = "overlay"
+
+  validation {
+    condition     = var.network_plugin_mode == null || var.network_plugin_mode == "overlay"
+    error_message = "network_plugin_mode must be either null (standard Azure CNI) or 'overlay'."
   }
 }
 

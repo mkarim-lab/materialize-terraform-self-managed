@@ -1,6 +1,7 @@
 provider "azurerm" {
   # Set the Azure subscription ID here or use the AZURE_SUBSCRIPTION_ID environment variable
-  subscription_id = var.subscription_id
+  subscription_id                 = var.subscription_id
+  resource_provider_registrations = "none"
 
   features {
     resource_group {
@@ -11,6 +12,14 @@ provider "azurerm" {
       recover_soft_deleted_key_vaults = false
     }
   }
+}
+
+# Read-only provider for the cross-subscription private DNS zone (prod subscription)
+provider "azurerm" {
+  alias                           = "dns"
+  subscription_id                 = var.dns_subscription_id
+  resource_provider_registrations = "none"
+  features {}
 }
 
 provider "kubernetes" {
@@ -46,14 +55,6 @@ provider "kubectl" {
 
 
 locals {
-  vnet_config = {
-    address_space                      = "20.0.0.0/16"
-    aks_subnet_cidr                    = "20.0.0.0/20"
-    postgres_subnet_cidr               = "20.0.16.0/24"
-    enable_api_server_vnet_integration = true
-    api_server_subnet_cidr             = "20.0.32.0/27" # keeping atleast 32 IPs reserved for API server and related services used in delegation might reduce it later.
-  }
-
   aks_config = {
     kubernetes_version         = "1.34"
     service_cidr               = "20.1.0.0/16"
@@ -64,8 +65,6 @@ locals {
   node_pool_config = {
     vm_size              = "Standard_E4pds_v6"
     auto_scaling_enabled = true
-    min_nodes            = 2
-    max_nodes            = 5
     node_count           = null
     disk_size_gb         = 100
     swap_enabled         = true
@@ -134,6 +133,12 @@ locals {
   storage_class = "managed-csi"
 }
 
+# Import block for pre-existing resource group.
+# Remove this block after the first successful terraform apply.
+import {
+  to = azurerm_resource_group.materialize
+  id = "/subscriptions/204be851-cdc4-4c59-b589-ce6c61ea3e63/resourceGroups/SGNPDAU-MATERIALIZE-DEMO-RESOURCES"
+}
 
 resource "azurerm_resource_group" "materialize" {
   name     = var.resource_group_name
@@ -141,21 +146,32 @@ resource "azurerm_resource_group" "materialize" {
 }
 
 
-module "networking" {
-  source = "../../modules/networking"
+# Read-only lookups of existing shared network resources — nothing is created or modified
+data "azurerm_virtual_network" "existing" {
+  name                = var.existing_vnet_name
+  resource_group_name = var.existing_vnet_resource_group
+}
 
-  resource_group_name                = azurerm_resource_group.materialize.name
-  location                           = var.location
-  prefix                             = var.name_prefix
-  vnet_address_space                 = local.vnet_config.address_space
-  aks_subnet_cidr                    = local.vnet_config.aks_subnet_cidr
-  postgres_subnet_cidr               = local.vnet_config.postgres_subnet_cidr
-  enable_api_server_vnet_integration = local.vnet_config.enable_api_server_vnet_integration
-  api_server_subnet_cidr             = local.vnet_config.api_server_subnet_cidr
+data "azurerm_subnet" "aks" {
+  name                 = var.existing_aks_subnet_name
+  virtual_network_name = var.existing_vnet_name
+  resource_group_name  = var.existing_vnet_resource_group
+}
 
-  tags = var.tags
+data "azurerm_subnet" "postgres" {
+  name                 = var.existing_postgres_subnet_name
+  virtual_network_name = var.existing_vnet_name
+  resource_group_name  = var.existing_vnet_resource_group
+}
 
-  depends_on = [azurerm_resource_group.materialize]
+# NAT Gateway not used: egress is via Azure Firewall + user-defined routing
+# (UDR) on the AKS subnet (see outbound_type = "userDefinedRouting" in the
+# aks module), so there is no NAT Gateway public IP to look up here.
+
+data "azurerm_private_dns_zone" "postgres" {
+  provider            = azurerm.dns
+  name                = "privatelink.postgres.database.azure.com"
+  resource_group_name = var.dns_zone_resource_group
 }
 
 # AKS Cluster with Default Node Pool
@@ -167,19 +183,24 @@ module "aks" {
   service_cidr        = local.aks_config.service_cidr
   location            = var.location
   prefix              = var.name_prefix
-  vnet_name           = module.networking.vnet_name
-  subnet_name         = module.networking.aks_subnet_name
-  subnet_id           = module.networking.aks_subnet_id
+  vnet_name           = data.azurerm_virtual_network.existing.name
+  subnet_name         = data.azurerm_subnet.aks.name
+  subnet_id           = data.azurerm_subnet.aks.id
 
-  enable_api_server_vnet_integration = local.vnet_config.enable_api_server_vnet_integration
-  k8s_apiserver_authorized_networks  = concat(var.k8s_apiserver_authorized_networks, ["${module.networking.nat_gateway_public_ip}/32"])
-  api_server_subnet_id               = module.networking.api_server_subnet_id
+  enable_api_server_vnet_integration = false
+  k8s_apiserver_authorized_networks  = var.k8s_apiserver_authorized_networks
+  api_server_subnet_id               = null
+
+  # Azure CNI Overlay: pods use pod_cidr instead of consuming AKS subnet IPs.
+  network_plugin_mode = var.network_plugin_mode
+  pod_cidr            = var.pod_cidr
 
   # Default node pool with autoscaling (runs all workloads except Materialize)
   default_node_pool_vm_size             = "Standard_D4ps_v5"
   default_node_pool_enable_auto_scaling = true
-  default_node_pool_min_count           = 2
-  default_node_pool_max_count           = 5
+  default_node_pool_min_count           = var.default_node_pool_min_count
+  default_node_pool_max_count           = var.default_node_pool_max_count
+  default_node_pool_max_pods            = var.default_node_pool_max_pods
   default_node_pool_node_labels         = local.generic_node_labels
 
   # Optional: Enable monitoring
@@ -197,18 +218,19 @@ module "materialize_nodepool" {
 
   prefix     = var.name_prefix
   cluster_id = module.aks.cluster_id
-  subnet_id  = module.networking.aks_subnet_id
+  subnet_id  = data.azurerm_subnet.aks.id
 
   # Workload-specific configuration
   autoscaling_config = {
     enabled    = local.node_pool_config.auto_scaling_enabled
-    min_nodes  = local.node_pool_config.min_nodes
-    max_nodes  = local.node_pool_config.max_nodes
+    min_nodes  = var.materialize_node_pool_min_nodes
+    max_nodes  = var.materialize_node_pool_max_nodes
     node_count = local.node_pool_config.node_count
   }
 
   vm_size      = local.node_pool_config.vm_size
   disk_size_gb = local.node_pool_config.disk_size_gb
+  max_pods     = var.materialize_node_pool_max_pods
   swap_enabled = local.node_pool_config.swap_enabled
 
   labels = local.materialize_node_labels
@@ -227,7 +249,7 @@ module "materialize_nodepool" {
 module "database" {
   source = "../../modules/database"
 
-  depends_on = [module.networking]
+  depends_on = [azurerm_resource_group.materialize]
 
   # Database configuration using new structure
   databases = [
@@ -245,8 +267,8 @@ module "database" {
   resource_group_name = azurerm_resource_group.materialize.name
   location            = var.location
   prefix              = var.name_prefix
-  subnet_id           = module.networking.postgres_subnet_id
-  private_dns_zone_id = module.networking.private_dns_zone_id
+  subnet_id           = data.azurerm_subnet.postgres.id
+  private_dns_zone_id = data.azurerm_private_dns_zone.postgres.id
 
   # Database server configuration
   sku_name                      = local.database_config.sku_name
@@ -265,7 +287,7 @@ module "storage" {
   location                       = var.location
   prefix                         = var.name_prefix
   workload_identity_principal_id = module.aks.workload_identity_principal_id
-  subnets                        = [module.networking.aks_subnet_id]
+  subnets                        = [data.azurerm_subnet.aks.id]
   container_name                 = local.storage_container_name
 
   # Workload identity federation configuration
@@ -287,13 +309,14 @@ resource "random_password" "external_login_password_mz_system" {
 
 # Deploy custom CoreDNS with TTL 0 (AKS's coredns doesn't support disabling caching)
 module "coredns" {
-  source             = "../../../kubernetes/modules/coredns"
-  node_selector      = local.generic_node_labels
-  kubeconfig_data    = module.aks.kube_config_raw
-  cluster_identifier = module.aks.cluster_name
+  source                             = "../../../kubernetes/modules/coredns"
+  node_selector                      = local.generic_node_labels
+  kubeconfig_data                    = module.aks.kube_config_raw
+  cluster_identifier                 = module.aks.cluster_name
+  disable_default_coredns            = false
+  disable_default_coredns_autoscaler = false
   depends_on = [
     module.aks,
-    module.networking,
   ]
 }
 
@@ -304,7 +327,6 @@ module "cert_manager" {
 
   depends_on = [
     module.aks,
-    module.networking,
     module.coredns,
   ]
 }
@@ -429,7 +451,6 @@ module "materialize_instance" {
     module.aks,
     module.database,
     module.storage,
-    module.networking,
     module.self_signed_cluster_issuer,
     module.operator,
     module.materialize_nodepool,

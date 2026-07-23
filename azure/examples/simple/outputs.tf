@@ -2,15 +2,15 @@
 output "networking" {
   description = "Networking details"
   value = {
-    vnet_id               = module.networking.vnet_id
-    vnet_name             = module.networking.vnet_name
-    aks_subnet_id         = module.networking.aks_subnet_id
-    api_server_subnet_id  = module.networking.api_server_subnet_id
-    postgres_subnet_id    = module.networking.postgres_subnet_id
-    private_dns_zone_id   = module.networking.private_dns_zone_id
-    nat_gateway_id        = module.networking.nat_gateway_id
-    nat_gateway_public_ip = module.networking.nat_gateway_public_ip
-    vnet_address_space    = module.networking.vnet_address_space
+    vnet_id               = data.azurerm_virtual_network.existing.id
+    vnet_name             = data.azurerm_virtual_network.existing.name
+    aks_subnet_id         = data.azurerm_subnet.aks.id
+    api_server_subnet_id  = null
+    postgres_subnet_id    = data.azurerm_subnet.postgres.id
+    private_dns_zone_id   = data.azurerm_private_dns_zone.postgres.id
+    nat_gateway_id        = null
+    nat_gateway_public_ip = null # Not used: egress is via Azure Firewall + UDR
+    vnet_address_space    = data.azurerm_virtual_network.existing.address_space
   }
 }
 

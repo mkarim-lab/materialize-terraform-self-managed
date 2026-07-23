@@ -30,6 +30,18 @@ variable "disk_size_gb" {
   nullable = false
 }
 
+variable "max_pods" {
+  description = "Maximum number of pods per node. Azure CNI pre-allocates (max_count + 1 surge) * (max_pods + 1) IPs from the subnet, so lower this to fit small subnets."
+  type        = number
+  default     = 30
+  nullable    = false
+
+  validation {
+    condition     = var.max_pods >= 10 && var.max_pods <= 250
+    error_message = "max_pods must be between 10 and 250 (Azure CNI limits)."
+  }
+}
+
 variable "autoscaling_config" {
   description = "Auto-scaling configuration for the node pool"
   type = object({
