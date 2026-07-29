@@ -274,71 +274,148 @@ resource "kubernetes_deployment" "coredns" {
 # reintroduced by storing the kubeconfig there and reading
 # `self.store.sensitive_output` — though the stored credentials would still
 # usually be expired by destroy time.
+# The scale-down scripts below are written to real files on disk (via the
+# local provider) rather than passed inline through the local-exec
+# provisioner's `command`. On Windows, passing a long multi-line heredoc
+# through `interpreter = ["bash", "-c"]` is unreliable - the OS process-launch
+# layer (and/or an MSYS2/Git-Bash or WSL relay in between bash and the real
+# shell) can mangle or drop newlines and quoting in the inline command before
+# bash ever sees it, corrupting the script. Writing the script to a file and
+# invoking it with a short, single-argument command line (`bash "<path>"`)
+# avoids all of that; only a single quoted path needs to survive the
+# Windows/Unix argument boundary, not the entire script's syntax.
+resource "local_file" "scale_down_kube_dns_autoscaler_script" {
+  count           = var.disable_default_coredns_autoscaler ? 1 : 0
+  filename        = "${path.root}/.terraform/tmp/coredns/scale_down_kube_dns_autoscaler.sh"
+  file_permission = "0700"
+  # replace() strips any \r\n that may have been introduced if this .tf file
+  # is checked out with Windows-style (CRLF) line endings (e.g. git
+  # core.autocrlf=true) - a stray \r attaches to the last token of each shell
+  # line (e.g. "pipefail\r"), which bash parses as part of that token and
+  # rejects, producing garbled-looking errors because the raw \r byte moves
+  # the terminal cursor back to column 0 when the error message is printed.
+  #
+  # The kubeconfig/deployment/namespace values are baked directly into the
+  # script as literal assignments (via Terraform interpolation) rather than
+  # read from the local-exec `environment` block at runtime. On this host,
+  # `bash` resolves through a relay (WSL launcher or similar) that does not
+  # forward the parent process's environment variables into the shell that
+  # actually executes the script, causing "unbound variable" errors even
+  # though the provisioner's `environment` block sets them. Embedding the
+  # values as part of the file content sidesteps that boundary entirely. The
+  # kubeconfig is base64-encoded here (and decoded in the script) because it
+  # is arbitrary multi-line YAML that may contain quotes/special characters
+  # unsafe to splice directly into a double-quoted bash string.
+  content = replace(<<-EOT
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    KUBECONFIG_DATA_B64="${base64encode(var.kubeconfig_data)}"
+    DEPLOYMENT_NAME="${var.coredns_autoscaler_deployment_to_scale_down}"
+    NAMESPACE="${local.namespace}"
+
+    kubeconfig_file=$(mktemp)
+    trap "rm -f '$${kubeconfig_file}'" EXIT
+    echo "$${KUBECONFIG_DATA_B64}" | base64 --decode > "$${kubeconfig_file}"
+
+    output=$(kubectl --kubeconfig="$${kubeconfig_file}" scale deployment "$${DEPLOYMENT_NAME}" -n "$${NAMESPACE}" --replicas=0 2>&1) || {
+      if echo "$output" | grep -q "no objects passed to scale"; then
+        echo "Deployment $${DEPLOYMENT_NAME} not found, skipping"
+        exit 0
+      fi
+      echo "Error scaling down $${DEPLOYMENT_NAME} deployment: $output"
+      exit 1
+    }
+    echo "Successfully scaled down $${DEPLOYMENT_NAME} to 0 replicas"
+  EOT
+  , "\r\n", "\n")
+}
+
+resource "local_file" "scale_down_kube_dns_script" {
+  count           = var.disable_default_coredns ? 1 : 0
+  filename        = "${path.root}/.terraform/tmp/coredns/scale_down_kube_dns.sh"
+  file_permission = "0700"
+  # See the comment on local_file.scale_down_kube_dns_autoscaler_script above
+  # for why replace() is used to strip \r, and why the values are baked into
+  # the script directly instead of read from the local-exec `environment`
+  # block.
+  content = replace(<<-EOT
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    KUBECONFIG_DATA_B64="${base64encode(var.kubeconfig_data)}"
+    DEPLOYMENT_NAME="${var.coredns_deployment_to_scale_down}"
+    NAMESPACE="${local.namespace}"
+
+    kubeconfig_file=$(mktemp)
+    trap "rm -f '$${kubeconfig_file}'" EXIT
+    echo "$${KUBECONFIG_DATA_B64}" | base64 --decode > "$${kubeconfig_file}"
+
+    output=$(kubectl --kubeconfig="$${kubeconfig_file}" scale deployment "$${DEPLOYMENT_NAME}" -n "$${NAMESPACE}" --replicas=0 2>&1) || {
+      if echo "$output" | grep -q "no objects passed to scale"; then
+        echo "Deployment $${DEPLOYMENT_NAME} not found, skipping"
+        exit 0
+      fi
+      echo "Error scaling down $${DEPLOYMENT_NAME} deployment: $output"
+      exit 1
+    }
+    echo "Successfully scaled down $${DEPLOYMENT_NAME} to 0 replicas"
+  EOT
+  , "\r\n", "\n")
+}
+
 resource "terraform_data" "scale_down_kube_dns_autoscaler" {
   count            = var.disable_default_coredns_autoscaler ? 1 : 0
   triggers_replace = [var.cluster_identifier, var.coredns_autoscaler_deployment_to_scale_down, local.namespace]
+
+  # The script is written to a real file (instead of being passed inline as a
+  # multi-line heredoc through `interpreter = ["bash", "-c"]`) because on
+  # Windows, the OS process-launch layer (and/or an MSYS2/Git-Bash or WSL
+  # relay in between) can mangle or drop newlines/quoting in long inline
+  # commands, corrupting the script before bash ever sees it. Invoking a file
+  # with a short, single-argument command line avoids that entirely.
+  depends_on = [local_file.scale_down_kube_dns_autoscaler_script]
+
   provisioner "local-exec" {
-    interpreter = ["/usr/bin/env", "bash", "-c"]
+    # interpreter = ["bash"] (no "-c") makes Terraform exec bash directly
+    # with `command` as a single argv element, instead of routing it through
+    # an intermediate shell (cmd /C on Windows, /bin/sh -c otherwise). That
+    # intermediate shell/relay is what was re-quoting (and corrupting) the
+    # path previously, so it must be avoided here too, not just for the
+    # script contents.
+    #
+    # No `environment` block is used: on this host, `bash` resolves through
+    # a relay that does not forward the parent process's environment
+    # variables into the shell that runs the script (see the comment on
+    # local_file.scale_down_kube_dns_autoscaler_script), so all inputs are
+    # baked directly into the script file content instead.
+    interpreter = ["bash"]
     when        = create
     on_failure  = fail
-    environment = {
-      KUBECONFIG_DATA = var.kubeconfig_data
-      DEPLOYMENT_NAME = var.coredns_autoscaler_deployment_to_scale_down
-      NAMESPACE       = local.namespace
-    }
-    command = <<-EOT
-      set -euo pipefail
-
-      kubeconfig_file=$(mktemp)
-      trap "rm -f '$${kubeconfig_file}'" EXIT
-      echo "$${KUBECONFIG_DATA}" > "$${kubeconfig_file}"
-
-      output=$(kubectl --kubeconfig="$${kubeconfig_file}" scale deployment $${DEPLOYMENT_NAME} -n $${NAMESPACE} --replicas=0 2>&1) || {
-        if echo "$output" | grep -q "no objects passed to scale"; then
-          echo "Deployment $${DEPLOYMENT_NAME} not found, skipping"
-          exit 0
-        fi
-        echo "Error scaling down $${DEPLOYMENT_NAME} deployment: $output"
-        exit 1
-      }
-      echo "Successfully scaled down $${DEPLOYMENT_NAME} to 0 replicas"
-    EOT
+    command     = local_file.scale_down_kube_dns_autoscaler_script[0].filename
   }
 }
 
 resource "terraform_data" "scale_down_kube_dns" {
   count            = var.disable_default_coredns ? 1 : 0
   triggers_replace = [var.cluster_identifier, var.coredns_deployment_to_scale_down, local.namespace]
+
+  # See the comment on local_file.scale_down_kube_dns_autoscaler_script above
+  # for why this script is written to a file instead of passed inline.
+  depends_on = [
+    local_file.scale_down_kube_dns_script,
+    terraform_data.scale_down_kube_dns_autoscaler,
+  ]
+
   provisioner "local-exec" {
-    interpreter = ["/usr/bin/env", "bash", "-c"]
+    # See the comment in scale_down_kube_dns_autoscaler above for why
+    # interpreter = ["bash"] (with an unquoted path) is used, and why no
+    # `environment` block is needed here.
+    interpreter = ["bash"]
     when        = create
     on_failure  = fail
-    environment = {
-      KUBECONFIG_DATA = var.kubeconfig_data
-      DEPLOYMENT_NAME = var.coredns_deployment_to_scale_down
-      NAMESPACE       = local.namespace
-    }
-
-    command = <<-EOT
-      set -euo pipefail
-
-      kubeconfig_file=$(mktemp)
-      trap "rm -f '$${kubeconfig_file}'" EXIT
-      echo "$${KUBECONFIG_DATA}" > "$${kubeconfig_file}"
-
-      output=$(kubectl --kubeconfig="$${kubeconfig_file}" scale deployment $${DEPLOYMENT_NAME} -n $${NAMESPACE} --replicas=0 2>&1) || {
-        if echo "$output" | grep -q "no objects passed to scale"; then
-          echo "Deployment $${DEPLOYMENT_NAME} not found, skipping"
-          exit 0
-        fi
-        echo "Error scaling down kube-dns deployment: $output"
-        exit 1
-      }
-      echo "Successfully scaled down $${DEPLOYMENT_NAME} to 0 replicas"
-    EOT
+    command     = local_file.scale_down_kube_dns_script[0].filename
   }
-
-  depends_on = [terraform_data.scale_down_kube_dns_autoscaler]
 }
 
 module "hpa" {
