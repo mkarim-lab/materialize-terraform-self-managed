@@ -2,15 +2,15 @@
 output "networking" {
   description = "Networking details"
   value = {
-    vnet_id               = module.networking.vnet_id
-    vnet_name             = module.networking.vnet_name
-    aks_subnet_id         = module.networking.aks_subnet_id
-    api_server_subnet_id  = module.networking.api_server_subnet_id
-    postgres_subnet_id    = module.networking.postgres_subnet_id
-    private_dns_zone_id   = module.networking.private_dns_zone_id
-    nat_gateway_id        = module.networking.nat_gateway_id
-    nat_gateway_public_ip = module.networking.nat_gateway_public_ip
-    vnet_address_space    = module.networking.vnet_address_space
+    vnet_id               = local.net_vnet_id
+    vnet_name             = local.net_vnet_name
+    aks_subnet_id         = local.net_aks_subnet_id
+    api_server_subnet_id  = local.net_api_server_subnet_id
+    postgres_subnet_id    = local.net_postgres_subnet_id
+    private_dns_zone_id   = local.net_private_dns_zone_id
+    nat_gateway_id        = var.use_existing_network ? null : module.networking[0].nat_gateway_id
+    nat_gateway_public_ip = local.net_nat_gateway_public_ip
+    vnet_address_space    = var.use_existing_network ? null : module.networking[0].vnet_address_space
   }
 }
 

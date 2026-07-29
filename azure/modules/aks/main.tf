@@ -5,10 +5,8 @@ resource "azurerm_user_assigned_identity" "aks_identity" {
   tags                = var.tags
 }
 
-data "azurerm_subscription" "current" {}
-
 resource "azurerm_role_assignment" "aks_network_contributer" {
-  scope                = "/subscriptions/${data.azurerm_subscription.current.subscription_id}/resourceGroups/${var.resource_group_name}/providers/Microsoft.Network/virtualNetworks/${var.vnet_name}/subnets/${var.subnet_name}"
+  scope                = "/subscriptions/${var.subscription_id}/resourceGroups/${coalesce(var.vnet_resource_group_name, var.resource_group_name)}/providers/Microsoft.Network/virtualNetworks/${var.vnet_name}/subnets/${var.subnet_name}"
   role_definition_name = "Network Contributor"
   principal_id         = resource.azurerm_user_assigned_identity.aks_identity.principal_id
 }
@@ -47,6 +45,7 @@ resource "azurerm_kubernetes_cluster" "aks" {
     vnet_subnet_id               = var.subnet_id
     os_disk_size_gb              = var.default_node_pool_os_disk_size_gb
     node_labels                  = var.default_node_pool_node_labels
+    max_pods                     = var.default_node_pool_max_pods
 
     upgrade_settings {
       max_surge                     = "10%"
@@ -88,14 +87,16 @@ resource "azurerm_kubernetes_cluster" "aks" {
   }
 
   network_profile {
-    network_plugin     = var.network_plugin
-    network_policy     = var.network_policy
-    network_data_plane = var.network_data_plane
-    service_cidr       = var.service_cidr
-    dns_service_ip     = var.dns_service_ip != null ? var.dns_service_ip : cidrhost(var.service_cidr, 10)
-    load_balancer_sku  = var.load_balancer_sku
+    network_plugin      = var.network_plugin
+    network_plugin_mode = var.network_plugin_mode
+    pod_cidr            = var.pod_cidr
+    network_policy      = var.network_policy
+    network_data_plane  = var.network_data_plane
+    service_cidr        = var.service_cidr
+    dns_service_ip      = var.dns_service_ip != null ? var.dns_service_ip : cidrhost(var.service_cidr, 10)
+    load_balancer_sku   = var.load_balancer_sku
     # https://learn.microsoft.com/en-gb/azure/aks/nat-gateway#create-an-aks-cluster-with-a-user-assigned-nat-gateway
-    outbound_type = "userAssignedNATGateway"
+    outbound_type = var.outbound_type
   }
 
   storage_profile {
@@ -134,6 +135,11 @@ resource "azurerm_kubernetes_cluster" "aks" {
     precondition {
       condition     = !var.enable_api_server_vnet_integration || var.api_server_subnet_id != null
       error_message = "api_server_subnet_id must be provided when enable_api_server_vnet_integration is true."
+    }
+
+    precondition {
+      condition     = var.network_plugin_mode != "overlay" || var.pod_cidr != null
+      error_message = "pod_cidr must be provided when network_plugin_mode is 'overlay'."
     }
   }
 }

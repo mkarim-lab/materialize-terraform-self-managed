@@ -22,6 +22,18 @@ variable "vnet_name" {
   nullable    = false
 }
 
+variable "vnet_resource_group_name" {
+  description = "Resource group containing the VNet/subnets used by AKS (for the Network Contributor role assignment scope). Defaults to resource_group_name when the VNet lives in the same resource group as the AKS cluster; set explicitly when reusing an existing VNet in a different resource group."
+  type        = string
+  default     = null
+}
+
+variable "subscription_id" {
+  description = "The Azure subscription ID, used to build the Network Contributor role assignment scope. Passed in explicitly (rather than looked up via a data source) so the scope stays statically known at plan time, even while other unrelated resources in the same apply are still pending."
+  type        = string
+  nullable    = false
+}
+
 variable "subnet_name" {
   description = "The name of the subnet for AKS"
   type        = string
@@ -128,6 +140,17 @@ variable "default_node_pool_os_disk_size_gb" {
   nullable    = false
 }
 
+variable "default_node_pool_max_pods" {
+  description = "Maximum number of pods per node in the default node pool. This is set at node pool creation time and cannot be changed later without recreating the node pool. Lower this (e.g. to 15-20) when the AKS subnet is small and using traditional Azure CNI, since Azure reserves one subnet IP per pod slot per node regardless of actual pod count. Leave null to use the AKS/provider default (30 for Azure CNI)."
+  type        = number
+  default     = null
+
+  validation {
+    condition     = var.default_node_pool_max_pods == null || var.default_node_pool_max_pods > 0
+    error_message = "default_node_pool_max_pods must be greater than 0 when set."
+  }
+}
+
 variable "default_node_pool_node_labels" {
   description = "Node labels for the default node pool"
   type        = map(string)
@@ -202,6 +225,28 @@ variable "network_data_plane" {
   }
 }
 
+variable "network_plugin_mode" {
+  description = "AKS network plugin mode. Set to 'overlay' to use Azure CNI Overlay, where pods get IPs from pod_cidr instead of consuming IPs from the VNet subnet. Leave null for traditional Azure CNI."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.network_plugin_mode == null || var.network_plugin_mode == "overlay"
+    error_message = "network_plugin_mode must be null or 'overlay'."
+  }
+}
+
+variable "pod_cidr" {
+  description = "CIDR range for pod IPs when network_plugin_mode is 'overlay'. Must not overlap the VNet address space, service_cidr, or any peered/on-prem network. Required when network_plugin_mode is 'overlay'."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.pod_cidr == null || can(cidrhost(var.pod_cidr, 0))
+    error_message = "pod_cidr must be a valid CIDR block (e.g. '100.64.0.0/16')."
+  }
+}
+
 variable "disk_driver_enabled" {
   description = "Whether Disk CSI Driver is enabled"
   type        = bool
@@ -230,6 +275,16 @@ variable "load_balancer_sku" {
   validation {
     condition     = contains(["basic", "standard"], var.load_balancer_sku)
     error_message = "Load balancer SKU must be either 'basic' or 'standard'."
+  }
+}
+
+variable "outbound_type" {
+  description = "How outbound (egress) traffic from the cluster is routed. Use 'userAssignedNATGateway' when subnet_id points to a subnet with a NAT Gateway association (the default, created by the networking module). Use 'userDefinedRouting' when reusing an existing subnet that already has its own egress path (e.g. UDR to a firewall) instead of a NAT Gateway - the subnet_id subnet must NOT have a NAT Gateway associated in that case."
+  type        = string
+  default     = "userAssignedNATGateway"
+  validation {
+    condition     = contains(["loadBalancer", "managedNATGateway", "userAssignedNATGateway", "userDefinedRouting"], var.outbound_type)
+    error_message = "outbound_type must be one of: loadBalancer, managedNATGateway, userAssignedNATGateway, userDefinedRouting."
   }
 }
 
