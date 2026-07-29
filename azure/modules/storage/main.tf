@@ -1,5 +1,5 @@
 resource "azurerm_storage_account" "materialize" {
-  name                = replace("${var.prefix}stg${random_string.unique.result}", "-", "")
+  name                = replace("${var.prefix}stg", "-", "")
   resource_group_name = var.resource_group_name
   location            = var.location
   # TODO: revisit to make sure we are using best set of values for storage account tier, replication type, and kind
