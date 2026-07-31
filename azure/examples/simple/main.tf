@@ -71,11 +71,11 @@ locals {
   }
 
   node_pool_config = {
-    vm_size              = "Standard_E4pds_v6"
-    auto_scaling_enabled = true
-    min_nodes            = 2
-    max_nodes            = 5
-    node_count           = null
+    vm_size              = var.materialize_node_pool_vm_size
+    auto_scaling_enabled = var.materialize_node_pool_auto_scaling_enabled
+    min_nodes            = var.materialize_node_pool_min_nodes
+    max_nodes            = var.materialize_node_pool_max_nodes
+    node_count           = var.materialize_node_pool_node_count
     disk_size_gb         = 100
     swap_enabled         = true
   }
@@ -524,6 +524,11 @@ module "materialize_instance" {
   #   max_sources                   = "50"
   #   max_sinks                     = "50"
   system_parameters = {}
+
+  # balancerd's 256Mi default can OOM-kill under high connection load; raise
+  # to 2Gi to give it headroom.
+  balancer_memory_request = "2Gi"
+  balancer_memory_limit   = "2Gi"
 
   depends_on = [
     module.aks,

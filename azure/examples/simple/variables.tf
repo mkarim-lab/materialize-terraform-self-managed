@@ -176,3 +176,62 @@ variable "default_node_pool_max_pods" {
     error_message = "default_node_pool_max_pods must be greater than 0 when set."
   }
 }
+
+# ============================================================================
+# Materialize-dedicated node pool sizing
+# ============================================================================
+# A Materialize cluster replica (created via `CREATE CLUSTER ... SIZE = '<n>cc'`)
+# runs as a single pod that cannot span nodes. Each node must have enough
+# allocatable CPU/memory for the largest replica size you plan to run, PLUS
+# environmentd, balancerd, console, and AKS system-reserved overhead, since all
+# of these are pinned (via taint/toleration) to this same node pool. See
+# Materialize's mz_cluster_replica_sizes system catalog for authoritative,
+# live cc-to-resource mappings; as of this writing, 100cc requires ~2
+# exclusive vCPU, ~15.5 GiB memory, and ~30 GiB scratch disk (via swap).
+
+variable "materialize_node_pool_vm_size" {
+  description = "VM size for the Materialize-dedicated AKS node pool. Must have enough allocatable CPU/memory for the largest cluster replica size (cc) you plan to run, plus environmentd/balancerd/console overhead. Standard_E8pds_v6 (8 vCPU / 64 GiB) comfortably fits a single 100cc replica (2 vCPU / 15.5 GiB) with headroom."
+  type        = string
+  default     = "Standard_E8pds_v6"
+  nullable    = false
+}
+
+variable "materialize_node_pool_auto_scaling_enabled" {
+  description = "Whether autoscaling is enabled for the Materialize-dedicated node pool."
+  type        = bool
+  default     = true
+  nullable    = false
+}
+
+variable "materialize_node_pool_min_nodes" {
+  description = "Minimum node count for the Materialize node pool when autoscaling is enabled."
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = !var.materialize_node_pool_auto_scaling_enabled || var.materialize_node_pool_min_nodes > 0
+    error_message = "materialize_node_pool_min_nodes must be greater than 0 when autoscaling is enabled."
+  }
+}
+
+variable "materialize_node_pool_max_nodes" {
+  description = "Maximum node count for the Materialize node pool when autoscaling is enabled."
+  type        = number
+  default     = 5
+
+  validation {
+    condition     = !var.materialize_node_pool_auto_scaling_enabled || var.materialize_node_pool_max_nodes >= var.materialize_node_pool_min_nodes
+    error_message = "materialize_node_pool_max_nodes must be greater than or equal to materialize_node_pool_min_nodes when autoscaling is enabled."
+  }
+}
+
+variable "materialize_node_pool_node_count" {
+  description = "Fixed node count for the Materialize node pool when autoscaling is disabled."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.materialize_node_pool_auto_scaling_enabled || var.materialize_node_pool_node_count > 0
+    error_message = "materialize_node_pool_node_count must be greater than 0 when autoscaling is disabled."
+  }
+}
