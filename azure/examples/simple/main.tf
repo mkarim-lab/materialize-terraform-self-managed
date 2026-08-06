@@ -275,7 +275,7 @@ module "aks" {
   outbound_type = var.use_existing_network ? "userDefinedRouting" : "userAssignedNATGateway"
 
   # Default node pool with autoscaling (runs all workloads except Materialize)
-  default_node_pool_vm_size             = "Standard_D4ps_v5"
+  default_node_pool_vm_size             = var.default_node_pool_vm_size
   default_node_pool_enable_auto_scaling = true
   default_node_pool_min_count           = 2
   default_node_pool_max_count           = 5
@@ -367,6 +367,8 @@ module "storage" {
   workload_identity_principal_id = module.aks.workload_identity_principal_id
   subnets                        = [local.net_aks_subnet_id]
   container_name                 = local.storage_container_name
+
+  public_network_access_enabled = var.storage_public_network_access_enabled
 
   # Workload identity federation configuration
   workload_identity_id      = module.aks.workload_identity_id
