@@ -87,3 +87,10 @@ variable "network_rules_default_action" {
     error_message = "Valid values for network_rules_default_action are: Allow, Deny."
   }
 }
+
+variable "public_network_access_enabled" {
+  description = "Whether the storage account is accessible from the public internet. Set to false to restrict access to private endpoints / allowed VNets only."
+  type        = bool
+  default     = false
+  nullable    = false
+}

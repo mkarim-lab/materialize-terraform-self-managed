@@ -178,6 +178,33 @@ variable "default_node_pool_max_pods" {
 }
 
 # ============================================================================
+# Storage account network access
+# ============================================================================
+
+variable "storage_public_network_access_enabled" {
+  description = "Whether the Materialize storage account is reachable over its public endpoint. Defaults to false (deny) - requires a private endpoint or VNet service-endpoint rule for connectivity. Set true only if you need public access."
+  type        = bool
+  default     = false
+  nullable    = false
+}
+
+# ============================================================================
+# AKS default (system) node pool sizing
+# ============================================================================
+# Hosts everything NOT pinned to the Materialize-dedicated node pool: the
+# materialize-operator, cert-manager, coredns, ingress/load-balancer
+# controllers, and (if enabled) prometheus/grafana. Kept separate from
+# materialize_node_pool_vm_size so this pool can be sized independently of
+# cluster replica requirements.
+
+variable "default_node_pool_vm_size" {
+  description = "VM size for the AKS default (system) node pool, which hosts the materialize-operator, cert-manager, coredns, and other cluster-wide addons (not Materialize cluster replicas themselves, which run on the dedicated pool sized via materialize_node_pool_vm_size)."
+  type        = string
+  default     = "Standard_D4pds_v6"
+  nullable    = false
+}
+
+# ============================================================================
 # Materialize-dedicated node pool sizing
 # ============================================================================
 # A Materialize cluster replica (created via `CREATE CLUSTER ... SIZE = '<n>cc'`)
