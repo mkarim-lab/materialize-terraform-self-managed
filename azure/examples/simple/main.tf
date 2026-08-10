@@ -105,9 +105,10 @@ locals {
   )
 
   persist_backend_url = format(
-    "%s%s",
+    "%s%s?%s",
     module.storage.primary_blob_endpoint,
     module.storage.container_name,
+    trimprefix(module.storage.persist_sas_token, "?"),
   )
 
   materialize_instance_namespace = "materialize-environment"

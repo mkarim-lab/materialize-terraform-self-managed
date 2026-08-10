@@ -4,10 +4,13 @@ resource "azurerm_storage_account" "materialize" {
   location            = var.location
   # TODO: revisit to make sure we are using best set of values for storage account tier, replication type, and kind
   # and what other options user have to configure this.
-  account_tier             = "Premium"
-  account_replication_type = "LRS"
-  account_kind             = "BlockBlobStorage"
-  min_tls_version          = "TLS1_2"
+  account_tier              = "Premium"
+  account_replication_type  = "LRS"
+  account_kind              = "BlockBlobStorage"
+  min_tls_version           = "TLS1_2"
+  shared_access_key_enabled = true
+
+  public_network_access_enabled = var.public_network_access_enabled
 
   dynamic "network_rules" {
     for_each = length(var.subnets) == 0 ? [] : ["has_subnets"]
@@ -48,4 +51,42 @@ resource "azurerm_federated_identity_credential" "materialize_storage" {
   issuer              = var.oidc_issuer_url
   parent_id           = var.workload_identity_id
   subject             = "system:serviceaccount:${var.service_account_namespace}:${var.service_account_name}"
+}
+
+# Account SAS for persist blob access. Replaces workload-identity auth, which
+# is unusable until mz_persist_client re-reads AZURE_FEDERATED_TOKEN_FILE.
+data "azurerm_storage_account_sas" "persist" {
+  connection_string = azurerm_storage_account.materialize.primary_connection_string
+  https_only        = true
+  signed_version    = "2022-11-02"
+
+  resource_types {
+    service   = true
+    container = true
+    object    = true
+  }
+
+  services {
+    blob  = true
+    queue = false
+    table = false
+    file  = false
+  }
+
+  # NOTE: hardcoded literals, deliberately. See gotcha #1 below.
+  start  = "2026-08-01T00:00:00Z"
+  expiry = "2029-08-01T00:00:00Z"
+
+  permissions {
+    read    = true
+    write   = true
+    delete  = true
+    list    = true
+    add     = true
+    create  = true
+    update  = true
+    process = true
+    tag     = false
+    filter  = false
+  }
 }

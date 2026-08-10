@@ -17,3 +17,9 @@ output "federated_identity_credential_id" {
   description = "The ID of the federated identity credential for workload identity"
   value       = azurerm_federated_identity_credential.materialize_storage.id
 }
+
+output "persist_sas_token" {
+  description = "Account SAS query string for the persist container"
+  value       = data.azurerm_storage_account_sas.persist.sas
+  sensitive   = true
+}

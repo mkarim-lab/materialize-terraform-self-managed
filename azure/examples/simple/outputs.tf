@@ -135,6 +135,7 @@ output "materialize_instance_metadata_backend_url" {
 output "materialize_instance_persist_backend_url" {
   description = "Materialize instance persist backend URL"
   value       = module.materialize_instance.persist_backend_url
+  sensitive   = true
 }
 
 # Load balancer outputs
