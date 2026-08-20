@@ -50,6 +50,11 @@ locals {
   helm_values = {
     adminPassword = local.admin_password
 
+    service = merge(
+      { type = var.service_type },
+      length(var.service_annotations) > 0 ? { annotations = var.service_annotations } : {}
+    )
+
     persistence = {
       enabled          = true
       size             = var.storage_size
@@ -123,5 +128,17 @@ resource "helm_release" "grafana" {
 
   depends_on = [
     kubernetes_config_map.dashboards,
+  ]
+}
+
+# Only resolves to a real IP once service_type = "LoadBalancer"; otherwise stays null.
+data "kubernetes_service" "grafana" {
+  metadata {
+    name      = "grafana"
+    namespace = var.namespace
+  }
+
+  depends_on = [
+    helm_release.grafana,
   ]
 }

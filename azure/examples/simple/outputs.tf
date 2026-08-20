@@ -171,6 +171,11 @@ output "grafana_url" {
   value       = var.enable_observability ? module.grafana[0].grafana_url : null
 }
 
+output "grafana_load_balancer_ip" {
+  description = "IP address of the Grafana LoadBalancer (internal, like console/balancerd)"
+  value       = var.enable_observability ? module.grafana[0].load_balancer_ip : null
+}
+
 output "grafana_admin_password" {
   description = "`admin` password for Grafana"
   value       = var.enable_observability ? module.grafana[0].admin_password : null

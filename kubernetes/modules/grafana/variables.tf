@@ -41,6 +41,20 @@ variable "prometheus_url" {
   nullable    = false
 }
 
+variable "service_type" {
+  description = "Kubernetes Service type for the Grafana service (e.g. ClusterIP, LoadBalancer)"
+  type        = string
+  default     = "ClusterIP"
+  nullable    = false
+}
+
+variable "service_annotations" {
+  description = "Annotations for the Grafana Service, e.g. service.beta.kubernetes.io/azure-load-balancer-internal for an internal Azure LB"
+  type        = map(string)
+  default     = {}
+  nullable    = false
+}
+
 variable "admin_password" {
   description = "Admin password for Grafana. If not set, a random password will be generated."
   type        = string

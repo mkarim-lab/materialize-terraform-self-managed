@@ -506,6 +506,12 @@ module "grafana" {
   prometheus_url   = module.prometheus[0].prometheus_url
   node_selector    = local.generic_node_labels
 
+  # Internal-IP access like console/balancerd, instead of only kubectl port-forward.
+  service_type = "LoadBalancer"
+  service_annotations = {
+    "service.beta.kubernetes.io/azure-load-balancer-internal" = var.internal_load_balancer ? "true" : "false"
+  }
+
   # Modest bump over module defaults (100m/128Mi) for heavier dashboard queries.
   resources = {
     requests = {
