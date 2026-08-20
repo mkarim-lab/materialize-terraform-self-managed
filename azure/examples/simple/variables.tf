@@ -178,6 +178,24 @@ variable "default_node_pool_max_pods" {
 }
 
 # ============================================================================
+# PostgreSQL Flexible Server storage
+# ============================================================================
+
+variable "database_storage_mb" {
+  description = "Storage capacity in MB for the PostgreSQL Flexible Server. If this drifts from what is actually deployed (e.g. resized manually via Portal/CLI outside Terraform), a decrease here forces server replacement (data loss) - always set this to match the live value before planning/applying unrelated changes."
+  type        = number
+  default     = 32768
+  nullable    = false
+}
+
+variable "database_auto_grow_enabled" {
+  description = "Whether PostgreSQL Flexible Server storage auto-grow is enabled."
+  type        = bool
+  default     = true
+  nullable    = false
+}
+
+# ============================================================================
 # Storage account network access
 # ============================================================================
 

@@ -83,6 +83,13 @@ variable "storage_mb" {
   nullable = false
 }
 
+variable "auto_grow_enabled" {
+  description = "Whether storage auto-grow is enabled for the PostgreSQL Flexible Server."
+  type        = bool
+  default     = false
+  nullable    = false
+}
+
 variable "backup_retention_days" {
   description = "The number of days to retain backups"
   type        = number

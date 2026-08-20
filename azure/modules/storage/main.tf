@@ -22,6 +22,20 @@ resource "azurerm_storage_account" "materialize" {
   }
 
   tags = var.storage_account_tags
+
+  lifecycle {
+    # Microsoft Defender for Cloud's Storage Data Scanner attaches a
+    # private_link_access block inside network_rules out-of-band. Terraform's
+    # ignore_changes doesn't support indexing into a dynamically-generated
+    # nested block's sub-attributes, so the whole network_rules block is
+    # ignored here instead of having every plan/apply try to remove
+    # Defender's own configuration. If you need to change
+    # network_rules_default_action or subnets later, temporarily remove this
+    # ignore_changes entry, apply, then re-add it.
+    ignore_changes = [
+      network_rules,
+    ]
+  }
 }
 
 resource "azurerm_storage_container" "materialize" {

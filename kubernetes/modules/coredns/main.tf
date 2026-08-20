@@ -7,6 +7,21 @@ locals {
     "provisioned-by" = "materialize"
   }
 
+  # A bare "bash" is ambiguous on Windows: C:\Windows\System32 ships its own
+  # bash.exe launcher stub for WSL, and if that directory appears before Git
+  # for Windows' bin directory on PATH, Terraform's local-exec provisioner
+  # ends up running the script inside a WSL Linux distro instead of Git Bash
+  # - a different filesystem where kubectl (a Windows binary) typically
+  # isn't installed, failing with "kubectl: command not found". Pin to Git
+  # Bash's well-known install path on Windows so this can't be hijacked by
+  # PATH order; fall back to a bare "bash" lookup on Linux/macOS runners
+  # where this ambiguity doesn't exist.
+  bash_interpreter = (
+    fileexists("C:/Program Files/Git/bin/bash.exe")
+    ? ["C:/Program Files/Git/bin/bash.exe"]
+    : ["bash"]
+  )
+
   # Corefile with TTL 0 first in the kubernetes plugin block (required for correct parsing)
   corefile = <<-EOF
     .:53 {
@@ -384,12 +399,21 @@ resource "terraform_data" "scale_down_kube_dns_autoscaler" {
     # path previously, so it must be avoided here too, not just for the
     # script contents.
     #
+    # On Windows, a bare "bash" is ambiguous: if C:\Windows\System32 (which
+    # ships a bash.exe launcher stub for WSL) appears before Git's bin
+    # directory on PATH, Terraform ends up running the script inside a WSL
+    # Linux distro instead of Git Bash - a completely different filesystem
+    # where kubectl (a Windows binary) isn't installed, failing with
+    # "kubectl: command not found". Using local.bash_interpreter pins this
+    # to Git Bash's absolute path on Windows so it can't be hijacked by PATH
+    # order, while still using a bare "bash" lookup on Linux/macOS runners.
+    #
     # No `environment` block is used: on this host, `bash` resolves through
     # a relay that does not forward the parent process's environment
     # variables into the shell that runs the script (see the comment on
     # local_file.scale_down_kube_dns_autoscaler_script), so all inputs are
     # baked directly into the script file content instead.
-    interpreter = ["bash"]
+    interpreter = local.bash_interpreter
     when        = create
     on_failure  = fail
     command     = local_file.scale_down_kube_dns_autoscaler_script[0].filename
@@ -409,9 +433,9 @@ resource "terraform_data" "scale_down_kube_dns" {
 
   provisioner "local-exec" {
     # See the comment in scale_down_kube_dns_autoscaler above for why
-    # interpreter = ["bash"] (with an unquoted path) is used, and why no
+    # local.bash_interpreter (rather than a bare "bash") is used, and why no
     # `environment` block is needed here.
-    interpreter = ["bash"]
+    interpreter = local.bash_interpreter
     when        = create
     on_failure  = fail
     command     = local_file.scale_down_kube_dns_script[0].filename
