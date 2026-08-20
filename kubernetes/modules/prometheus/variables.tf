@@ -26,6 +26,16 @@ variable "install_timeout" {
   nullable    = false
 }
 
+variable "kube_state_metrics_image" {
+  description = "Override registry/repository/tag for the kube-state-metrics subchart image, for environments where registry.k8s.io egress is blocked (e.g. mcr.microsoft.com/oss/v2/kubernetes/kube-state-metrics mirror on Azure). Null uses the chart's default."
+  type = object({
+    registry   = string
+    repository = string
+    tag        = string
+  })
+  default = null
+}
+
 variable "storage_size" {
   description = "Storage size for Prometheus server persistent volume"
   type        = string

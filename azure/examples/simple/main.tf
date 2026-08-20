@@ -83,7 +83,8 @@ locals {
   database_config = {
     sku_name                      = "GP_Standard_D2s_v3"
     postgres_version              = "15"
-    storage_mb                    = 32768
+    storage_mb                    = var.database_storage_mb
+    auto_grow_enabled             = var.database_auto_grow_enabled
     backup_retention_days         = 7
     administrator_login           = "materialize"
     administrator_password        = null # Will generate random password
@@ -353,6 +354,7 @@ module "database" {
   sku_name                      = local.database_config.sku_name
   postgres_version              = local.database_config.postgres_version
   storage_mb                    = local.database_config.storage_mb
+  auto_grow_enabled             = local.database_config.auto_grow_enabled
   backup_retention_days         = local.database_config.backup_retention_days
   public_network_access_enabled = local.database_config.public_network_access_enabled
 
@@ -464,6 +466,28 @@ module "prometheus" {
   node_selector    = local.generic_node_labels
   storage_class    = local.storage_class
 
+  # Above module defaults (500m/512Mi request) - sized for the 300cc/600cc
+  # ar_serving/ar_transform replicas' higher scrape cardinality in this env.
+  server_resources = {
+    requests = {
+      cpu    = "1000m"
+      memory = "2Gi"
+    }
+    limits = {
+      cpu    = "2000m"
+      memory = "4Gi"
+    }
+  }
+  storage_size = "100Gi"
+
+  # This VNet's egress firewall blocks registry.k8s.io (TLS handshake reset);
+  # mcr.microsoft.com is Microsoft's always-reachable mirror for the same image.
+  kube_state_metrics_image = {
+    registry   = "mcr.microsoft.com"
+    repository = "oss/v2/kubernetes/kube-state-metrics"
+    tag        = "v2.17.0"
+  }
+
   depends_on = [
     module.operator,
     module.aks,
@@ -481,6 +505,18 @@ module "grafana" {
   create_namespace = false
   prometheus_url   = module.prometheus[0].prometheus_url
   node_selector    = local.generic_node_labels
+
+  # Modest bump over module defaults (100m/128Mi) for heavier dashboard queries.
+  resources = {
+    requests = {
+      cpu    = "250m"
+      memory = "256Mi"
+    }
+    limits = {
+      cpu    = "1000m"
+      memory = "1Gi"
+    }
+  }
 
   depends_on = [
     module.prometheus,

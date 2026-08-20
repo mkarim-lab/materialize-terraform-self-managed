@@ -111,6 +111,16 @@ resource "azurerm_kubernetes_cluster" "aks" {
   ]
 
   lifecycle {
+    # Microsoft Defender for Cloud (microsoft_defender) and Azure Monitor
+    # managed Prometheus (monitor_metrics) can both be attached to an AKS
+    # cluster out-of-band (Portal/CLI). Since this module doesn't declare
+    # either block, ignore drift here instead of having every plan/apply try
+    # to remove them.
+    ignore_changes = [
+      microsoft_defender,
+      monitor_metrics,
+    ]
+
     precondition {
       condition     = !var.enable_azure_monitor || var.log_analytics_workspace_id != null
       error_message = "log_analytics_workspace_id must be provided when enable_azure_monitor is true."

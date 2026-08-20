@@ -57,9 +57,16 @@ locals {
     alertmanager = {
       enabled = false
     }
-    kube-state-metrics = {
-      enabled = true
-    }
+    kube-state-metrics = merge(
+      { enabled = true },
+      var.kube_state_metrics_image != null ? {
+        image = {
+          registry   = var.kube_state_metrics_image.registry
+          repository = var.kube_state_metrics_image.repository
+          tag        = var.kube_state_metrics_image.tag
+        }
+      } : {}
+    )
     prometheus-node-exporter = {
       enabled = true
     }
