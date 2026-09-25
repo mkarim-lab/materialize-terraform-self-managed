@@ -83,6 +83,12 @@ variable "storage_mb" {
   nullable = false
 }
 
+variable "storage_tier" {
+  description = "Storage performance tier (P4, P6, P10, P15, P20, P30, P40, P50, P60, P70, P80) for IOPS on Premium_LRS storage. Null keeps Azure's default tier for the given storage_mb. Can be scaled once every 12 hours; not supported when storage_type is PremiumV2_LRS."
+  type        = string
+  default     = null
+}
+
 variable "auto_grow_enabled" {
   description = "Whether storage auto-grow is enabled for the PostgreSQL Flexible Server."
   type        = bool

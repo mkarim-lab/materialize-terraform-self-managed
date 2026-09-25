@@ -44,3 +44,5 @@ tests/.terraform.lock.hcl
 test/*/t[0-9]*-*/
 .github/setup/*/terraform.tfstate
 .github/setup/*/backend-override.tf
+/temp/
+**/tmp

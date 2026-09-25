@@ -57,8 +57,17 @@ locals {
     alertmanager = {
       enabled = false
     }
+    # NOTE: `scrapeConfigs` above fully replaces the chart's default scrape jobs (which
+    # normally auto-discover these subcharts), so kube-state-metrics/node-exporter need
+    # their own prometheus.io/scrape annotations to be picked up by the "kubernetes-pods" job.
     kube-state-metrics = merge(
-      { enabled = true },
+      {
+        enabled = true
+        podAnnotations = {
+          "prometheus.io/scrape" = "true"
+          "prometheus.io/port"   = "8080"
+        }
+      },
       var.kube_state_metrics_image != null ? {
         image = {
           registry   = var.kube_state_metrics_image.registry
@@ -69,6 +78,10 @@ locals {
     )
     prometheus-node-exporter = {
       enabled = true
+      podAnnotations = {
+        "prometheus.io/scrape" = "true"
+        "prometheus.io/port"   = "9100"
+      }
     }
     prometheus-pushgateway = {
       enabled = false

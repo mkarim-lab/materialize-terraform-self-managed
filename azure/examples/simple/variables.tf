@@ -62,10 +62,24 @@ variable "environmentd_memory_limit" {
   default     = "16Gi"
 }
 
+variable "environmentd_version" {
+  description = "Version tag for the materialize/environmentd image (e.g. 'v26.34.1'). Pin this explicitly per-environment so `terraform plan` never shows an unreviewed environmentd version bump."
+  type        = string
+  default     = "v26.34.1"
+  nullable    = false
+}
+
 variable "request_rollout" {
   description = "UUID to request a rollout"
   type        = string
   default     = "00000000-0000-0000-0000-000000000001"
+}
+
+variable "system_parameters" {
+  description = "System parameters to configure for the Materialize instance (passed through to the materialize-instance module's system_parameters ConfigMap). See: https://materialize.com/docs/self-managed-deployments/configuration-system-parameters/"
+  type        = map(string)
+  default     = {}
+  nullable    = false
 }
 
 variable "k8s_apiserver_authorized_networks" {
@@ -216,6 +230,13 @@ variable "aks_support_plan" {
   }
 }
 
+variable "kubernetes_version" {
+  description = "Full AKS Kubernetes version (major.minor.patch, e.g. '1.34.10'). Pin the exact patch actually running on the cluster (check with `az aks show --query kubernetesVersion`) - a minor-only value like '1.34' lets Azure pick/roll the patch independently of Terraform, which then shows up as unreviewed drift on every plan."
+  type        = string
+  default     = "1.34.10"
+  nullable    = false
+}
+
 # ============================================================================
 # PostgreSQL Flexible Server storage
 # ============================================================================
@@ -225,6 +246,19 @@ variable "database_storage_mb" {
   type        = number
   default     = 32768
   nullable    = false
+}
+
+variable "database_sku_name" {
+  description = "SKU name for the PostgreSQL Flexible Server (e.g. GP_Standard_D2s_v3, GP_Standard_D2ds_v5, MO_Standard_E4ds_v5). In-place resize, no ForceNew - expect a brief restart on change."
+  type        = string
+  default     = "GP_Standard_D2s_v3"
+  nullable    = false
+}
+
+variable "database_storage_tier" {
+  description = "Storage performance tier (e.g. P4, P6, P10) for the PostgreSQL Flexible Server, controlling provisioned IOPS while staying on Premium_LRS storage (P4=120 IOPS, P6=240, P10=500, P15=1100, P20=2300 at this storage size). Null keeps Azure's default tier. In-place, but can only be changed once every 12 hours."
+  type        = string
+  default     = null
 }
 
 variable "database_auto_grow_enabled" {

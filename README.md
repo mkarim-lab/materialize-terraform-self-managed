@@ -142,6 +142,17 @@ terraform init
 terraform plan
 terraform apply
 ```
+**Get the mz_system password**
+
+```bash
+> terraform output -raw external_login_password_mz_system
+
+````
+**Increase the cluster size for mz_catalog_server**
+
+```
+ALTER CLUSTER mz_catalog_server SET (SIZE = '50cc')
+```
 
 4. **Connect to your Materialize instance** using the connection details from the Terraform outputs
 
@@ -161,6 +172,25 @@ module "materialize_instance" {
 ```
 
 Set the `ref=` portion to point at the latest tagged version of this repository.
+
+## Destory an existing environment 
+```
+cd azure/examples/simple
+terraform workspace list
+terraform workspace select default
+```
+select 'default' or the correct workspace 
+
+```
+terraform plan -destroy -var-file "terraform.tfvars" -out "destroy.tfplan"
+```
+Review destroy.tfplan carefully (redirect to a file and grep if it's large — the chat/tool output can truncate from the start on huge plans).
+
+Apply the destroy
+```
+terraform apply "destroy.tfplan"
+```
+
 
 ## Upgrading
 

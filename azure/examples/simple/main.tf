@@ -64,7 +64,7 @@ locals {
   }
 
   aks_config = {
-    kubernetes_version         = "1.34"
+    kubernetes_version         = var.kubernetes_version
     service_cidr               = "20.1.0.0/16"
     enable_azure_monitor       = false
     log_analytics_workspace_id = null
@@ -81,9 +81,10 @@ locals {
   }
 
   database_config = {
-    sku_name                      = "GP_Standard_D2s_v3"
+    sku_name                      = var.database_sku_name
     postgres_version              = "15"
     storage_mb                    = var.database_storage_mb
+    storage_tier                  = var.database_storage_tier
     auto_grow_enabled             = var.database_auto_grow_enabled
     backup_retention_days         = 7
     administrator_login           = "materialize"
@@ -358,6 +359,7 @@ module "database" {
   sku_name                      = local.database_config.sku_name
   postgres_version              = local.database_config.postgres_version
   storage_mb                    = local.database_config.storage_mb
+  storage_tier                  = local.database_config.storage_tier
   auto_grow_enabled             = local.database_config.auto_grow_enabled
   backup_retention_days         = local.database_config.backup_retention_days
   public_network_access_enabled = local.database_config.public_network_access_enabled
@@ -559,6 +561,8 @@ module "materialize_instance" {
 
   license_key = var.license_key
 
+  environmentd_version = var.environmentd_version
+
   issuer_ref = {
     name = module.self_signed_cluster_issuer.issuer_name
     kind = "ClusterIssuer"
@@ -572,7 +576,7 @@ module "materialize_instance" {
   #   max_clusters                  = "10"
   #   max_sources                   = "50"
   #   max_sinks                     = "50"
-  system_parameters = {}
+  system_parameters = var.system_parameters
 
   # Default of 1 vCPU (no cpu limit set) was the coordinator bottleneck under
   # 100rps load (measured: connection timeouts, 15.7s query, session count

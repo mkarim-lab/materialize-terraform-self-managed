@@ -113,14 +113,15 @@ resource "azurerm_kubernetes_cluster" "aks" {
   ]
 
   lifecycle {
-    # Microsoft Defender for Cloud (microsoft_defender) and Azure Monitor
-    # managed Prometheus (monitor_metrics) can both be attached to an AKS
-    # cluster out-of-band (Portal/CLI). Since this module doesn't declare
-    # either block, ignore drift here instead of having every plan/apply try
-    # to remove them.
+    # Microsoft Defender for Cloud (microsoft_defender), Azure Monitor managed
+    # Prometheus (monitor_metrics), and Azure Policy (azure_policy_enabled) can
+    # all be attached to an AKS cluster out-of-band (Portal/CLI). Since this
+    # module doesn't declare any of them, ignore drift here instead of having
+    # every plan/apply try to remove them.
     ignore_changes = [
       microsoft_defender,
       monitor_metrics,
+      azure_policy_enabled,
     ]
 
     precondition {

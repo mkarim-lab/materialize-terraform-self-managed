@@ -20,6 +20,7 @@ resource "azurerm_postgresql_flexible_server" "postgres" {
   administrator_password = var.administrator_password != null && var.administrator_password != "" ? var.administrator_password : random_password.admin_password[0].result
 
   storage_mb        = var.storage_mb
+  storage_tier      = var.storage_tier
   auto_grow_enabled = var.auto_grow_enabled
   sku_name          = var.sku_name
 
