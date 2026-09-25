@@ -32,6 +32,8 @@ resource "azurerm_kubernetes_cluster" "aks" {
   location            = var.location
   dns_prefix          = "${var.prefix}-aks"
   kubernetes_version  = var.kubernetes_version
+  sku_tier            = var.sku_tier
+  support_plan        = var.support_plan
 
   default_node_pool {
     temporary_name_for_rotation  = "default2"

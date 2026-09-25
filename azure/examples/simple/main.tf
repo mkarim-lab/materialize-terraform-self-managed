@@ -288,6 +288,10 @@ module "aks" {
   enable_azure_monitor       = local.aks_config.enable_azure_monitor
   log_analytics_workspace_id = local.aks_config.log_analytics_workspace_id
 
+  # Pricing tier / support plan
+  sku_tier     = var.aks_sku_tier
+  support_plan = var.aks_support_plan
+
   tags = var.tags
 
   depends_on = [azurerm_resource_group.materialize]
@@ -569,6 +573,16 @@ module "materialize_instance" {
   #   max_sources                   = "50"
   #   max_sinks                     = "50"
   system_parameters = {}
+
+  # Default of 1 vCPU (no cpu limit set) was the coordinator bottleneck under
+  # 100rps load (measured: connection timeouts, 15.7s query, session count
+  # 31->65); memory headroom bumped alongside it for the higher session count.
+  # No cpu limit is set below, so cpu_request only lowers the scheduling
+  # reservation, not envd's actual burst ceiling - see per-deployment tfvars
+  # for sizing notes (node fit, observed load-test CPU ceiling).
+  cpu_request    = var.environmentd_cpu_request
+  memory_request = var.environmentd_memory_limit
+  memory_limit   = var.environmentd_memory_limit
 
   # balancerd's 256Mi default can OOM-kill under high connection load; raise
   # to 2Gi to give it headroom.

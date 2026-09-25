@@ -50,6 +50,18 @@ variable "force_rollout" {
   default     = "00000000-0000-0000-0000-000000000001"
 }
 
+variable "environmentd_cpu_request" {
+  description = "CPU request for environmentd. No CPU limit is set, so this is a scheduling reservation, not a hard ceiling - see main.tf's materialize_instance module comment."
+  type        = string
+  default     = "7"
+}
+
+variable "environmentd_memory_limit" {
+  description = "Memory limit for environmentd. Also used as the memory request (kept equal to the limit for Guaranteed QoS)."
+  type        = string
+  default     = "16Gi"
+}
+
 variable "request_rollout" {
   description = "UUID to request a rollout"
   type        = string
@@ -174,6 +186,33 @@ variable "default_node_pool_max_pods" {
   validation {
     condition     = var.default_node_pool_max_pods == null || var.default_node_pool_max_pods > 0
     error_message = "default_node_pool_max_pods must be greater than 0 when set."
+  }
+}
+
+# ============================================================================
+# AKS pricing tier (SKU)
+# ============================================================================
+# https://learn.microsoft.com/en-us/azure/aks/free-standard-pricing-tiers
+
+variable "aks_sku_tier" {
+  description = "AKS pricing tier for the cluster management plane. Free has no uptime SLA (fine for dev/test). Standard adds a financially-backed 99.95% uptime SLA and is recommended for production. Premium additionally enables Kubernetes Long Term Support (requires aks_support_plan = AKSLongTermSupport)."
+  type        = string
+  default     = "Free"
+
+  validation {
+    condition     = contains(["Free", "Standard", "Premium"], var.aks_sku_tier)
+    error_message = "aks_sku_tier must be one of: Free, Standard, Premium."
+  }
+}
+
+variable "aks_support_plan" {
+  description = "AKS Kubernetes support plan. KubernetesOfficial follows the standard AKS support/version lifecycle. AKSLongTermSupport extends support for an extra year on a given minor version, but requires aks_sku_tier = Premium and has an additional cost per core."
+  type        = string
+  default     = "KubernetesOfficial"
+
+  validation {
+    condition     = contains(["KubernetesOfficial", "AKSLongTermSupport"], var.aks_support_plan)
+    error_message = "aks_support_plan must be one of: KubernetesOfficial, AKSLongTermSupport."
   }
 }
 

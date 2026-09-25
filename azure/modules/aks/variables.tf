@@ -328,3 +328,41 @@ variable "k8s_apiserver_authorized_networks" {
     error_message = "All k8s_apiserver_authorized_networks must be valid CIDR blocks (e.g., '203.0.113.0/24')."
   }
 }
+
+# ============================================================================
+# Pricing tier (SKU)
+# ============================================================================
+# https://learn.microsoft.com/en-us/azure/aks/free-standard-pricing-tiers
+variable "sku_tier" {
+  description = "AKS pricing tier for the cluster management plane. Free has no uptime SLA (fine for dev/test). Standard adds a financially-backed 99.95% uptime SLA and is recommended for production. Premium additionally enables Kubernetes Long Term Support (requires support_plan = AKSLongTermSupport)."
+  type        = string
+  default     = "Free"
+
+  validation {
+    condition     = contains(["Free", "Standard", "Premium"], var.sku_tier)
+    error_message = "sku_tier must be one of: Free, Standard, Premium."
+  }
+}
+
+variable "support_plan" {
+  description = "AKS Kubernetes support plan. KubernetesOfficial follows the standard AKS support/version lifecycle. AKSLongTermSupport extends support for an extra year on a given minor version, but requires sku_tier = Premium and has an additional cost per core."
+  type        = string
+  default     = "KubernetesOfficial"
+
+  validation {
+    condition     = contains(["KubernetesOfficial", "AKSLongTermSupport"], var.support_plan)
+    error_message = "support_plan must be one of: KubernetesOfficial, AKSLongTermSupport."
+  }
+
+  validation {
+    condition     = var.support_plan != "AKSLongTermSupport" || var.sku_tier == "Premium"
+    error_message = "support_plan = AKSLongTermSupport requires sku_tier = Premium."
+  }
+
+  # Azure requires Premium and LTS to be enabled/disabled together - a Premium
+  # cluster can't use the KubernetesOfficial support plan.
+  validation {
+    condition     = var.sku_tier != "Premium" || var.support_plan == "AKSLongTermSupport"
+    error_message = "sku_tier = Premium requires support_plan = AKSLongTermSupport."
+  }
+}

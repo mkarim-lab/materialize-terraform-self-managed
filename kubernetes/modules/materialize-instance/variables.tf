@@ -147,7 +147,7 @@ variable "balancer_memory_limit" {
 variable "balancer_cpu_request" {
   description = "CPU request for balancer"
   type        = string
-  default     = "100m"
+  default     = "1"
   nullable    = false
 }
 
