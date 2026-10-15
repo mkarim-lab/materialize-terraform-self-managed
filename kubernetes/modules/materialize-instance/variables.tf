@@ -151,6 +151,18 @@ variable "balancer_cpu_request" {
   nullable    = false
 }
 
+variable "balancerd_replicas" {
+  description = "Number of balancerd replicas. Null leaves it to the operator default."
+  type        = number
+  default     = null
+}
+
+variable "console_replicas" {
+  description = "Number of console replicas. Null leaves it to the operator default."
+  type        = number
+  default     = null
+}
+
 variable "authenticator_kind" {
   description = "Kind of authenticator to use for Materialize instance"
   type        = string

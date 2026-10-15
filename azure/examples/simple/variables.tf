@@ -63,9 +63,16 @@ variable "environmentd_memory_limit" {
 }
 
 variable "environmentd_version" {
-  description = "Version tag for the materialize/environmentd image (e.g. 'v26.34.1'). Pin this explicitly per-environment so `terraform plan` never shows an unreviewed environmentd version bump."
+  description = "Version tag for the materialize/environmentd image (e.g. 'v26.45.1'). Pin this explicitly per-environment so `terraform plan` never shows an unreviewed environmentd version bump."
   type        = string
-  default     = "v26.34.1"
+  default     = "v26.45.1"
+  nullable    = false
+}
+
+variable "operator_version" {
+  description = "Helm chart version of the Materialize operator (e.g. 'v26.45.1'). Must be >= environmentd_version; upgrade the operator first, then environmentd."
+  type        = string
+  default     = "v26.45.1"
   nullable    = false
 }
 
@@ -111,6 +118,30 @@ variable "enable_observability" {
   description = "Enable Prometheus and Grafana monitoring stack for Materialize"
   type        = bool
   default     = false
+}
+
+variable "prometheus_cpu_request" {
+  description = "CPU request for the Prometheus server (limit stays 2000m). Lower it so the monitoring stack fits a single default-pool node; requests, not usage, drive node scale-down."
+  type        = string
+  default     = "1000m"
+}
+
+variable "grafana_cpu_request" {
+  description = "CPU request for Grafana (limit stays 1000m)."
+  type        = string
+  default     = "250m"
+}
+
+variable "balancerd_replicas" {
+  description = "Number of balancerd replicas (null = operator default). Each replica requests 1 vCPU on the Materialize pool."
+  type        = number
+  default     = null
+}
+
+variable "console_replicas" {
+  description = "Number of console replicas (null = operator default). Each replica requests 0.5 vCPU on the Materialize pool."
+  type        = number
+  default     = null
 }
 
 # ============================================================================
@@ -189,6 +220,28 @@ variable "pod_cidr" {
   validation {
     condition     = var.pod_cidr == null || can(cidrhost(var.pod_cidr, 0))
     error_message = "pod_cidr must be a valid CIDR block (e.g. '100.64.0.0/16')."
+  }
+}
+
+variable "default_node_pool_min_nodes" {
+  description = "Autoscaler minimum for the default (system) node pool. Use 1 for non-prod; keep 2 for production so the operator, coredns and monitoring survive a node reboot or upgrade."
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = var.default_node_pool_min_nodes >= 1
+    error_message = "default_node_pool_min_nodes must be at least 1."
+  }
+}
+
+variable "default_node_pool_max_nodes" {
+  description = "Autoscaler maximum for the default (system) node pool."
+  type        = number
+  default     = 5
+
+  validation {
+    condition     = var.default_node_pool_max_nodes >= var.default_node_pool_min_nodes
+    error_message = "default_node_pool_max_nodes must be >= default_node_pool_min_nodes."
   }
 }
 

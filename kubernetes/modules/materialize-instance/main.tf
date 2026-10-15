@@ -78,6 +78,8 @@ resource "kubectl_manifest" "materialize_instance" {
             memory = var.balancer_memory_request
           }
         }
+        balancerdReplicas = var.balancerd_replicas
+        consoleReplicas   = var.console_replicas
 
         # internal_issuer_ref split: public ACME issuers can't sign single-label
         # cluster service names, so strip "balancerd"/"console" from the SAN list

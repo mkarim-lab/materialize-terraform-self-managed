@@ -61,6 +61,11 @@ locals {
       storageClassName = var.storage_class
     }
 
+    # The RWO disk can't attach to two nodes, so a rolling update deadlocks when the new pod lands elsewhere.
+    deploymentStrategy = {
+      type = "Recreate"
+    }
+
     resources = {
       requests = {
         cpu    = var.resources.requests.cpu

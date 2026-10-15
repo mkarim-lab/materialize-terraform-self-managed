@@ -280,8 +280,8 @@ module "aks" {
   # Default node pool with autoscaling (runs all workloads except Materialize)
   default_node_pool_vm_size             = var.default_node_pool_vm_size
   default_node_pool_enable_auto_scaling = true
-  default_node_pool_min_count           = 2
-  default_node_pool_max_count           = 5
+  default_node_pool_min_count           = var.default_node_pool_min_nodes
+  default_node_pool_max_count           = var.default_node_pool_max_nodes
   default_node_pool_node_labels         = local.generic_node_labels
   default_node_pool_max_pods            = var.default_node_pool_max_pods
 
@@ -433,8 +433,9 @@ module "self_signed_cluster_issuer" {
 module "operator" {
   source = "../../modules/operator"
 
-  name_prefix = var.name_prefix
-  location    = var.location
+  name_prefix      = var.name_prefix
+  location         = var.location
+  operator_version = var.operator_version
 
   instance_pod_tolerations = local.materialize_tolerations
   instance_node_selector   = local.materialize_node_labels
@@ -476,7 +477,7 @@ module "prometheus" {
   # ar_serving/ar_transform replicas' higher scrape cardinality in this env.
   server_resources = {
     requests = {
-      cpu    = "1000m"
+      cpu    = var.prometheus_cpu_request
       memory = "2Gi"
     }
     limits = {
@@ -521,7 +522,7 @@ module "grafana" {
   # Modest bump over module defaults (100m/128Mi) for heavier dashboard queries.
   resources = {
     requests = {
-      cpu    = "250m"
+      cpu    = var.grafana_cpu_request
       memory = "256Mi"
     }
     limits = {
@@ -592,6 +593,8 @@ module "materialize_instance" {
   # to 2Gi to give it headroom.
   balancer_memory_request = "2Gi"
   balancer_memory_limit   = "2Gi"
+  balancerd_replicas      = var.balancerd_replicas
+  console_replicas        = var.console_replicas
 
   depends_on = [
     module.aks,

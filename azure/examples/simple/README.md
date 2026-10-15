@@ -131,7 +131,7 @@ Run the usual Terraform workflow:
 terraform workspace list  -- show the work spaces  
 terraform workspace new [name] -- if you want to create a new work space 
 terraform select  [name]  -- to switch work space 
-
+terraform plan -var-file "terraform-sse7-2-au.tfvars.tfvars" -out "sse7-2-au.tfplan"
 terraform init
 terraform plan -var-file "[veriablefile].tfvars" -out "[name].tfplan"
 terraform apply "[name].tfplan"
@@ -198,6 +198,50 @@ If the blocking replica's CPU/memory is elevated and the logged `write_frontier`
 
 ---
 
+### Step 2.2: Upgrade the Materialize Version
+
+Two variables control the version, both set per environment in the `.tfvars` file:
+
+| Variable | What it is | Where it runs |
+|---|---|---|
+| `operator_version` | Helm chart version of the Materialize operator (`orchestratord`) | `materialize-operator` pod, system node pool |
+| `environmentd_version` | Image tag of the database itself (`environmentd` and the `clusterd` replicas it launches) | `environmentd` and cluster replica pods, Materialize node pool |
+
+```hcl
+environmentd_version = "v26.45.1"
+operator_version     = "v26.45.1" # keep >= environmentd_version
+```
+
+Rules:
+
+- Keep `operator_version` **>=** `environmentd_version`. The operator can manage older `environmentd` versions within the supported range, but not newer ones. Setting both to the same value is the safe default.
+- Both defaults in `variables.tf` are `v26.45.1`, but pin them explicitly in each `.tfvars` so a plan never shows an unreviewed version bump.
+- Use **stable** releases only (no `-rc.N` suffix). List available chart versions with `helm repo add materialize https://materializeinc.github.io/materialize/; helm search repo materialize/materialize-operator --versions`.
+- Review the [release notes](https://materialize.com/docs/releases/) between the current and target version for upgrade restrictions before applying to an environment that holds data.
+
+Upgrade procedure (same workspace, no `terraform init` needed unless providers changed):
+
+```bash
+terraform workspace select [name]
+terraform plan -var-file "[variablefile].tfvars" -out "[name].tfplan"
+terraform apply "[name].tfplan"
+```
+
+The plan should show only `module.operator` (Helm release) and `module.materialize_instance` (the `Materialize` custom resource `environmentdImageRef`) changing. The operator is upgraded first, then the instance rolls to a new generation as described in Step 2.1. Instances use the `v1` CRD, so the changed image starts the rollout automatically (`request_rollout` is ignored on `v1`). To force a new generation with no spec change, set a new `force_rollout` UUID.
+
+Downtime: with the default `WaitUntilReady` strategy the new generation hydrates alongside the old one, which keeps serving. Clients only see a brief connection drop at promotion, when `environmentd` and `balancerd` switch over (reconnect needed; expect seconds, not minutes). Rehydration time scales with data volume, and the node pool needs headroom for both generations at once.
+
+Verify:
+
+```bash
+az aks get-credentials -g SGSSE7-3-AU-MATERIALIZE-RESOURCES -n <sgsse7-3-au-materialize-aks> --subscription 204be851-cdc4-4c59-b589-ce6c61ea3e63
+helm list -n materialize
+kubectl get materialize -A -o jsonpath='{.items[0].spec.environmentdImageRef}'
+kubectl get pods -n materialize-environment
+```
+
+---
+
 ### Step 3: Accessing Materialize
 
 #### Get the mz_system password
@@ -211,10 +255,12 @@ If the blocking replica's CPU/memory is elevated and the logged `write_frontier`
 **Store this password seperately**
 
 ### Step 3: Setup sg user 
+This is the uase account that would be used by the CI/CD to configure the views and materialize clusters for vairous domains. 
 
 ```
 -- create the user account that would be used by the SQL scripts to setup the clusters/schema 
 CREATE ROLE "sgfleet_user" WITH LOGIN PASSWORD '<change_me>';
+ALTER ROLE sgfleet_user WITH SUPERUSER;
 
 -- increase the mz_catalog_server cc to make the console more responsive 
 ALTER CLUSTER mz_catalog_server SET (SIZE = '50cc');
