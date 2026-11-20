@@ -88,7 +88,7 @@ Before running Terraform, create a `terraform.tfvars` file with the following va
 subscription_id     = "12345678-1234-1234-1234-123456789012"
 resource_group_name = "materialize-demo-rg"
 name_prefix         = "simple-demo"
-location            = "westus2"
+location            = "australiaeast"
 license_key         = "your-materialize-license-key"  # Optional: Get from https://materialize.com/self-managed/
 tags = {
   environment = "demo"
@@ -242,6 +242,78 @@ kubectl get pods -n materialize-environment
 
 ---
 
+### Step 2.3: Consolidate Materialize Nodes (non-prod cost saving)
+
+After a rollout or resize, the autoscaler can leave a second, mostly empty node in the Materialize pool. It will not remove it itself because replica and `environmentd` pods are marked `safe-to-evict: false`. [`scripts/Consolidate-MaterializeNodes.ps1`](../../../scripts/Consolidate-MaterializeNodes.ps1) drains the unused node so the autoscaler can delete it.
+
+Prerequisites: `az` (logged in, with access to the cluster) and `kubectl` on the PATH. The script fetches credentials into a temporary kubeconfig and does not change your own contexts.
+
+#### How to run it
+
+Run from the repository root in PowerShell. The cluster name and resource group come from `terraform output` (`aks_cluster_name`, `resource_group_name`) or the `name_prefix` / `resource_group_name` in your `.tfvars`.
+
+```powershell
+# 0. Sign in and (optionally) allow the script to run in this session
+az login
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+
+# 1. Plan only - changes nothing. Review which nodes it would drain.
+# e.g .\scripts\Consolidate-MaterializeNodes.ps1 -ClusterName 'sgsse7-2-au-materialize-aks' -ResourceGroup 'SGSSE7-2-AU-MATERIALIZE-RESOURCES' -WhatIf
+.\scripts\Consolidate-MaterializeNodes.ps1 -ClusterName <aks-name> -ResourceGroup <resource-group> -WhatIf
+
+# 2. Run it - asks for confirmation before each drain
+.\scripts\Consolidate-MaterializeNodes.ps1 -ClusterName <aks-name> -ResourceGroup <resource-group>
+
+# Skip the prompts
+.\scripts\Consolidate-MaterializeNodes.ps1 -ClusterName <aks-name> -ResourceGroup <resource-group> -Confirm:$false
+
+# Different subscription from your current az context
+.\scripts\Consolidate-MaterializeNodes.ps1 -ClusterName <aks-name> -ResourceGroup <resource-group> -SubscriptionId <subscription-id>
+```
+
+If the script is run from inside the `scripts` folder, use `.\Consolidate-MaterializeNodes.ps1` instead.
+
+#### Verify the result
+
+```powershell
+az aks get-credentials -g <resource-group> -n <aks-name>
+
+# Drained node shows SchedulingDisabled; after ~10-15 minutes the autoscaler removes it
+kubectl get nodes -l agentpool=<materialize-node-pool>   # terraform output materialize_nodepool_name
+
+# All Materialize pods should be Running on the remaining node(s), none Pending
+kubectl get pods -n materialize-environment -o wide
+```
+
+| Parameter | Default | Purpose |
+|---|---|---|
+| `-ClusterName` | required | AKS cluster name |
+| `-ResourceGroup` | required | Resource group of the AKS cluster |
+| `-SubscriptionId` | current `az` subscription | Subscription to select first |
+| `-NodePool` | auto-detected from the `environmentd` pod | Node pool (`agentpool` label) to consolidate |
+| `-Namespace` | `materialize-environment` | Namespace holding the Materialize pods |
+| `-MinNodes` | `1` | Never go below this many schedulable nodes in the pool |
+| `-MaxUtilizationPercent` | `90` | Max requested CPU/memory/pods on the remaining nodes, as a percentage of allocatable |
+| `-DrainTimeoutSeconds` | `300` | Timeout passed to `kubectl drain` |
+| `-SettleSeconds` | `120` | Wait after each drain for new Pending pods to schedule |
+
+What it does:
+
+1. Simulates moving each node's pods onto the other nodes in the pool, using pod CPU/memory requests and the pod-count limit.
+2. Plans to drain the lightest node first; the node hosting `environmentd`, `balancerd` and `console` is kept for last.
+3. Cordons and drains each planned node. If any new pod stays Pending, it uncordons the node and stops.
+
+Afterwards the autoscaler removes the empty node in roughly 10-15 minutes (`kubectl get nodes`). To undo before it is removed, run `kubectl uncordon <node>`.
+
+Notes:
+
+- Use on non-prod clusters. Moved replicas restart and rehydrate, and a node failure or reboot then affects every Materialize pod on the remaining node.
+- The fit check uses requests, not live usage, and ignores node selectors and affinity. Always review the `-WhatIf` plan first.
+- Keep `materialize_node_pool_max_nodes` at 3 or more so the next rollout or size change can scale back up.
+- The default node pool can be consolidated the same way with `-NodePool default`, but it is limited by the 30 pods/node limit.
+
+---
+
 ### Step 3: Accessing Materialize
 
 #### Get the mz_system password
@@ -363,12 +435,72 @@ module "prometheus" {
 
 ---
 
+## Teardown
+
+Destroys everything the workspace created (resource group, AKS, PostgreSQL, storage, networking). This is irreversible and deletes all Materialize data, so back up anything you need first.
+
+### Step 1: Select the workspace and confirm it
+
+```bash
+terraform workspace select [name]
+terraform workspace show   # must print the environment you intend to destroy
+```
+
+### Step 2: Plan the destroy and review it
+
+Use the same `.tfvars` file the environment was deployed with.
+
+```bash
+terraform plan -destroy -var-file "[variablefile].tfvars" -out "[name]-destroy.tfplan"
+```
+
+Confirm every resource listed is in the expected resource group (e.g. `SGSSE7-TEMP-MATERIALIZE-RESOURCES`) and nothing belongs to another environment.
+
+### Step 3: Apply the destroy
+
+```bash
+terraform apply "[name]-destroy.tfplan"
+```
+
+One-step alternative (prompts for confirmation): `terraform destroy -var-file "[variablefile].tfvars"`.
+
+### Step 4: Remove the workspace (optional)
+
+A workspace cannot be deleted while it is selected.
+
+```bash
+terraform workspace select default
+terraform workspace delete [name]
+```
+
+### Step 5: Verify and clean up
+
+```bash
+# Should report the resource group no longer exists (the MC_* node resource group goes with the AKS cluster)
+az group exists -n <resource-group>
+
+# Remove the stale kubectl context/cluster/user entries for the deleted cluster
+kubectl config delete-context <aks-name>
+kubectl config delete-cluster <aks-name>
+kubectl config delete-user clusterUser_<resource-group>_<aks-name>
+```
+
+### Troubleshooting
+
+- **Destroy fails on Kubernetes/Helm resources** (cluster already unreachable or partly deleted): remove them from state so Terraform skips them, then re-run the destroy. The resource group deletion removes the cluster itself.
+
+  ```bash
+  terraform state list
+  terraform state rm <kubernetes_or_helm_resource_address>
+  ```
+
+- **Subnet or resource group "in use" errors**: usually an Azure load balancer or NIC created by Kubernetes that Terraform does not track. Re-run the destroy once, or delete the leftover resource in the `MC_*` resource group, then retry.
+- **Azure resources remain after a failed destroy**: delete the resource group directly with `az group delete -n <resource-group> --yes --no-wait`, then clear the workspace state (`terraform state list` should then be emptied with `terraform state rm`) or delete the workspace with `terraform workspace delete -force [name]`.
+
+---
+
 ## Notes
 
 * You can customize each module independently.
 * To reduce cost in your demo environment, you can tweak VM sizes and database tiers in `main.tf`.
-* Don't forget to destroy resources when finished:
-
-```bash
-terraform destroy
-```
+* Don't forget to tear down resources when finished. See [Teardown](#teardown).
